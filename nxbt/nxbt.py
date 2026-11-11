@@ -589,16 +589,32 @@ class Nxbt:
             if adapter_path in self._adapters_in_use:
                 raise ValueError("Specified adapter in use")
         else:
-            # Get all adapters we can use
-            usable_adapters = list(
-                set(self.get_available_adapters()["adapters"])
-                - set(self._adapters_in_use)
-            )
-            if len(usable_adapters) > 0:
-                # Use the first available adapter
-                adapter_path = usable_adapters[0]
-            else:
+            # Preserve detection order. Prefer USB when running as root (needed to
+            # detach the kernel driver on built-in Intel adapters); otherwise prefer
+            # HCI sockets, which work with file capabilities alone.
+            in_use = set(self._adapters_in_use)
+            usable_adapters = [
+                adapter
+                for adapter in self.get_available_adapters()["adapters"]
+                if adapter not in in_use
+            ]
+            if not usable_adapters:
                 raise ValueError("No adapters available")
+
+            usb_adapters = [
+                adapter for adapter in usable_adapters if adapter.startswith("usb:")
+            ]
+            hci_adapters = [
+                adapter
+                for adapter in usable_adapters
+                if adapter.startswith("hci-socket:")
+            ]
+            if os.geteuid() == 0 and usb_adapters:
+                adapter_path = usb_adapters[0]
+            elif hci_adapters:
+                adapter_path = hci_adapters[0]
+            else:
+                adapter_path = usable_adapters[0]
 
         controller_index = None
         try:

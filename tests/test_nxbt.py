@@ -70,6 +70,44 @@ class TestNxbt:
             msg = nxbt_instance.task_queue.get(timeout=1)
             assert msg["command"] == NxbtCommands.CREATE_CONTROLLER
 
+    def test_create_controller_prefers_hci_socket_as_user(self, nxbt_instance):
+        """Prefer HCI socket adapters over USB when not root."""
+        nxbt_instance._backend.get_available_adapters.return_value = {
+            "adapters": ["usb:0", "hci-socket:0"],
+            "has_permissions": True,
+        }
+
+        def side_effect_sleep(*args):
+            nxbt_instance.manager_state[0] = {"state": "connecting"}
+
+        with (
+            patch("nxbt.nxbt.os.geteuid", return_value=1000),
+            patch("time.sleep", side_effect=side_effect_sleep),
+        ):
+            idx = nxbt_instance.create_controller(PRO_CONTROLLER)
+            assert idx == 0
+            msg = nxbt_instance.task_queue.get(timeout=1)
+            assert msg["arguments"]["adapter_path"] == "hci-socket:0"
+
+    def test_create_controller_prefers_usb_as_root(self, nxbt_instance):
+        """Prefer USB adapters when root so kernel drivers can be detached."""
+        nxbt_instance._backend.get_available_adapters.return_value = {
+            "adapters": ["hci-socket:0", "usb:0"],
+            "has_permissions": True,
+        }
+
+        def side_effect_sleep(*args):
+            nxbt_instance.manager_state[0] = {"state": "connecting"}
+
+        with (
+            patch("nxbt.nxbt.os.geteuid", return_value=0),
+            patch("time.sleep", side_effect=side_effect_sleep),
+        ):
+            idx = nxbt_instance.create_controller(PRO_CONTROLLER)
+            assert idx == 0
+            msg = nxbt_instance.task_queue.get(timeout=1)
+            assert msg["arguments"]["adapter_path"] == "usb:0"
+
     def test_macro(self, nxbt_instance):
         """Test inputting a macro."""
         nxbt_instance.manager_state[0] = {"state": "connected", "finished_macros": []}
