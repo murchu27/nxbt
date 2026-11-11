@@ -1,5 +1,5 @@
-import multiprocessing
 import os
+import threading
 import time
 from collections import deque
 from sys import exit
@@ -9,6 +9,46 @@ import psutil
 from blessed import Terminal
 
 from .nxbt import Nxbt, PRO_CONTROLLER
+
+
+def _direct_input_worker(nxbt, controller_index, input_packet, stop_event):
+    """Push TUI keyboard state to the controller at ~120 Hz.
+
+    Runs in a thread rather than a multiprocessing.Process because Python
+    3.14 defaults to forkserver, which cannot pickle Nxbt or nested targets.
+    """
+    while not stop_event.is_set():
+        packet = input_packet["packet"]
+
+        ls_x_value = 0
+        ls_y_value = 0
+        if packet["L_STICK"]["LS_LEFT"]:
+            ls_x_value -= 100
+        if packet["L_STICK"]["LS_RIGHT"]:
+            ls_x_value += 100
+        if packet["L_STICK"]["LS_UP"]:
+            ls_y_value += 100
+        if packet["L_STICK"]["LS_DOWN"]:
+            ls_y_value -= 100
+        packet["L_STICK"]["X_VALUE"] = ls_x_value
+        packet["L_STICK"]["Y_VALUE"] = ls_y_value
+
+        rs_x_value = 0
+        rs_y_value = 0
+        if packet["R_STICK"]["RS_LEFT"]:
+            rs_x_value -= 100
+        if packet["R_STICK"]["RS_RIGHT"]:
+            rs_x_value += 100
+        if packet["R_STICK"]["RS_UP"]:
+            rs_y_value += 100
+        if packet["R_STICK"]["RS_DOWN"]:
+            rs_y_value -= 100
+        packet["R_STICK"]["X_VALUE"] = rs_x_value
+        packet["R_STICK"]["Y_VALUE"] = rs_y_value
+
+        input_packet["packet"] = packet
+        nxbt.set_controller_input(controller_index, packet)
+        time.sleep(1 / 120)
 
 
 class LoadingSpinner:
@@ -468,11 +508,9 @@ class InputTUI:
         self.exit_tui = False
         self.capture_input = True
 
-        # Create a packet that is accessible from a multiprocessing Process
-        # and from within threads
-        packet_manager = multiprocessing.Manager()
-        input_packet = packet_manager.dict()
-        input_packet["packet"] = self.nx.create_input_packet()
+        # Shared packet for the keyboard listener and input worker thread.
+        input_packet = {"packet": self.nx.create_input_packet()}
+        stop_event = threading.Event()
 
         print(term.move_y(term.height - 5))
         print(
@@ -540,45 +578,12 @@ class InputTUI:
                 except KeyError:
                     pass
 
-        def input_worker(nxbt, controller_index, input_packet):
-            while True:
-                packet = input_packet["packet"]
-
-                # Calculating left x/y stick values
-                ls_x_value = 0
-                ls_y_value = 0
-                if packet["L_STICK"]["LS_LEFT"]:
-                    ls_x_value -= 100
-                if packet["L_STICK"]["LS_RIGHT"]:
-                    ls_x_value += 100
-                if packet["L_STICK"]["LS_UP"]:
-                    ls_y_value += 100
-                if packet["L_STICK"]["LS_DOWN"]:
-                    ls_y_value -= 100
-                packet["L_STICK"]["X_VALUE"] = ls_x_value
-                packet["L_STICK"]["Y_VALUE"] = ls_y_value
-
-                # Calculating right x/y stick values
-                rs_x_value = 0
-                rs_y_value = 0
-                if packet["R_STICK"]["RS_LEFT"]:
-                    rs_x_value -= 100
-                if packet["R_STICK"]["RS_RIGHT"]:
-                    rs_x_value += 100
-                if packet["R_STICK"]["RS_UP"]:
-                    rs_y_value += 100
-                if packet["R_STICK"]["RS_DOWN"]:
-                    rs_y_value -= 100
-                packet["R_STICK"]["X_VALUE"] = rs_x_value
-                packet["R_STICK"]["Y_VALUE"] = rs_y_value
-
-                nxbt.set_controller_input(controller_index, packet)
-                time.sleep(1 / 120)
-
-        input_process = multiprocessing.Process(
-            target=input_worker, args=(self.nx, self.controller_index, input_packet)
+        input_thread = threading.Thread(
+            target=_direct_input_worker,
+            args=(self.nx, self.controller_index, input_packet, stop_event),
+            daemon=True,
         )
-        input_process.start()
+        input_thread.start()
 
         # Start a non-blocking keyboard event listener
         listener = keyboard.Listener(on_press=on_press, on_release=on_release)
@@ -587,8 +592,8 @@ class InputTUI:
         # Main TUI Loop
         while True:
             if self.exit_tui:
-                packet_manager.shutdown()
-                input_process.terminate()
+                stop_event.set()
+                input_thread.join(timeout=1.0)
                 break
             if not self.capture_input:
                 print(term.home + term.move_y((term.height // 2) - 4))
