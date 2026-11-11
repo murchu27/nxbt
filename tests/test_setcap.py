@@ -14,14 +14,29 @@ def test_grant_caps_hint_message():
 
 
 def test_has_cap_net_admin():
-    with patch(
-        "nxbt.setcap.get_executable_caps",
-        return_value="cap_net_admin=eip",
+    with (
+        patch("nxbt.setcap.os.geteuid", return_value=1000),
+        patch("nxbt.setcap.get_process_caps", return_value=None),
+        patch(
+            "nxbt.setcap.get_executable_caps",
+            return_value="cap_net_admin=eip",
+        ),
     ):
         assert has_cap_net_admin() is True
 
-    with patch("nxbt.setcap.get_executable_caps", return_value=None):
+    with (
+        patch("nxbt.setcap.os.geteuid", return_value=1000),
+        patch("nxbt.setcap.get_process_caps", return_value=None),
+        patch("nxbt.setcap.get_executable_caps", return_value=None),
+    ):
         assert has_cap_net_admin() is False
+
+    with (
+        patch("nxbt.setcap.os.geteuid", return_value=0),
+        patch("nxbt.setcap.get_process_caps", return_value=None),
+        patch("nxbt.setcap.get_executable_caps", return_value=None),
+    ):
+        assert has_cap_net_admin() is True
 
 
 def test_bumble_get_available_adapters_with_permissions():
@@ -52,15 +67,23 @@ def test_bumble_get_available_adapters_without_permissions():
 
 
 def test_has_bluez_caps():
-    with patch(
-        "nxbt.setcap.get_executable_caps",
-        return_value="cap_net_admin,cap_net_bind_service=eip",
+    with (
+        patch("nxbt.setcap.os.geteuid", return_value=1000),
+        patch("nxbt.setcap.get_process_caps", return_value=None),
+        patch(
+            "nxbt.setcap.get_executable_caps",
+            return_value="cap_net_admin,cap_net_bind_service=eip",
+        ),
     ):
         assert has_bluez_caps() is True
 
-    with patch(
-        "nxbt.setcap.get_executable_caps",
-        return_value="cap_net_admin=eip",
+    with (
+        patch("nxbt.setcap.os.geteuid", return_value=1000),
+        patch("nxbt.setcap.get_process_caps", return_value=None),
+        patch(
+            "nxbt.setcap.get_executable_caps",
+            return_value="cap_net_admin=eip",
+        ),
     ):
         assert has_bluez_caps() is False
 
