@@ -1,4 +1,5 @@
-FROM docker.m.daocloud.io/library/alpine:3.21
+# FROM docker.m.daocloud.io/library/alpine:3.21
+FROM alpine:3.21
 
 ARG TARGETARCH
 
@@ -38,4 +39,5 @@ RUN if [ "$TARGETARCH" = "386" ]; then \
       make && make install; \
     fi
 
-ENTRYPOINT ["/bin/nxbt"]
+# ENTRYPOINT ["/bin/nxbt"]
+ENTRYPOINT ["/usr/bin/nxbt"]
