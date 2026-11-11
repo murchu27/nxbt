@@ -2,6 +2,7 @@ import json
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import RLock
 from socket import gethostname
 
@@ -10,6 +11,7 @@ import uvicorn
 from engineio.payload import Payload
 from starlette.applications import Starlette
 from starlette.requests import Request
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -19,6 +21,7 @@ from .. import __version__
 from ..utils import load_file
 from ..nxbt import Nxbt, PRO_CONTROLLER
 from ..backends import BACKENDS
+from ..macro_recorder import MacroRecorder, default_macros_dir
 from ..setcap import GRANT_CAPS_HINT
 
 # Polling payloads can batch many input packets; default limit (16) is too low.
@@ -75,9 +78,29 @@ class WebApp:
                 request, "index.html", {"version": __version__}
             )
 
+        async def download_macro(request: Request):
+            name = request.path_params["name"]
+            # Basename-only: reject path traversal.
+            if Path(name).name != name or not name.endswith(".txt"):
+                return JSONResponse({"error": "Invalid macro name"}, status_code=400)
+            macros_root = default_macros_dir().resolve()
+            path = (macros_root / name).resolve()
+            try:
+                path.relative_to(macros_root)
+            except ValueError:
+                return JSONResponse({"error": "Macro not found"}, status_code=404)
+            if not path.is_file():
+                return JSONResponse({"error": "Macro not found"}, status_code=404)
+            return FileResponse(
+                path,
+                media_type="text/plain; charset=utf-8",
+                filename=name,
+            )
+
         return Starlette(
             routes=[
                 Route("/", index),
+                Route("/macros/{name}", download_macro),
                 Mount("/", StaticFiles(directory=static_dir), name="static"),
             ]
         )
@@ -90,6 +113,29 @@ class WebApp:
         self.sio.on("web_create_pro_controller")(self.on_create_controller)
         self.sio.on("input")(self.handle_input)
         self.sio.on("macro")(self.handle_macro)
+        self.sio.on("start_recording")(self.start_recording)
+        self.sio.on("stop_recording")(self.stop_recording)
+
+    def _recording_status_payload(self, recorder, *, recording, error=None):
+        path = recorder.output_path
+        payload = {
+            "recording": recording,
+            "path": str(path) if path else None,
+            "name": path.name if path else None,
+            "lines": recorder.line_count,
+        }
+        if error:
+            payload["error"] = error
+        return payload
+
+    def _stop_session_recorder(self, session):
+        recorder = session.get("recorder") if session else None
+        if recorder is None or not recorder.is_recording:
+            return None
+        try:
+            return recorder.stop()
+        except RuntimeError:
+            return None
 
     def _run_async(self, coro, *, wait=True):
         """Run a coroutine from sync Socket.IO handlers."""
@@ -126,7 +172,7 @@ class WebApp:
 
     def connect(self, sid, environ):
         with self._user_info_lock:
-            self._user_info[sid] = {}
+            self._user_info[sid] = {"recorder": MacroRecorder()}
         availability = self._get_adapter_availability()
         payload = {"available": len(availability["adapters"]) > 0}
         if not availability["adapters"]:
@@ -150,6 +196,7 @@ class WebApp:
             session = self._user_info.pop(sid, None)
             if session:
                 index = session.get("controller_index")
+                self._stop_session_recorder(session)
         if index is None:
             return
         try:
@@ -206,6 +253,11 @@ class WebApp:
         except ValueError:
             pass
 
+        with self._user_info_lock:
+            recorder = self._user_info.get(sid, {}).get("recorder")
+            if recorder is not None and recorder.is_recording:
+                recorder.sample(input_packet)
+
     def handle_macro(self, sid, message):
         message = json.loads(message)
         index = message[0]
@@ -214,6 +266,52 @@ class WebApp:
             self.nxbt.macro(index, macro)
         except ValueError:
             pass
+
+    def start_recording(self, sid, _message=None):
+        with self._user_info_lock:
+            session = self._user_info.get(sid)
+            if session is None:
+                return
+            recorder = session.setdefault("recorder", MacroRecorder())
+            try:
+                path = recorder.start()
+            except RuntimeError as e:
+                self._emit_to(
+                    sid,
+                    "recording_status",
+                    self._recording_status_payload(
+                        recorder, recording=recorder.is_recording, error=str(e)
+                    ),
+                )
+                return
+            payload = self._recording_status_payload(recorder, recording=True)
+            payload["path"] = str(path)
+            payload["name"] = path.name
+        self._emit_to(sid, "recording_status", payload)
+
+    def stop_recording(self, sid, _message=None):
+        with self._user_info_lock:
+            session = self._user_info.get(sid)
+            if session is None:
+                return
+            recorder = session.get("recorder")
+            if recorder is None:
+                return
+            try:
+                path = recorder.stop()
+            except RuntimeError as e:
+                self._emit_to(
+                    sid,
+                    "recording_status",
+                    self._recording_status_payload(
+                        recorder, recording=False, error=str(e)
+                    ),
+                )
+                return
+            payload = self._recording_status_payload(recorder, recording=False)
+            payload["path"] = str(path)
+            payload["name"] = path.name
+        self._emit_to(sid, "recording_status", payload)
 
     def run(
         self,

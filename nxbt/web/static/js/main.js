@@ -25,6 +25,10 @@ let HTML_ALERT_DIALOG_TITLE = document.getElementById("alert-dialog-title");
 let HTML_ALERT_DIALOG_MESSAGE = document.getElementById("alert-dialog-message");
 let HTML_CONTROLLER_SESSIONS = document.getElementById("controller-sessions");
 let HTML_CONTROLLER_SESSIONS_CONTAINER = document.getElementById("controller-session-container");
+let HTML_RECORD_MACRO_BTN = document.getElementById("record-macro-btn");
+let HTML_STOP_MACRO_BTN = document.getElementById("stop-macro-btn");
+let HTML_DOWNLOAD_MACRO_LINK = document.getElementById("download-macro-link");
+let HTML_RECORDING_STATUS = document.getElementById("recording-status");
 
 const ControllerState = {
     INITIALIZING: "initializing",
@@ -732,6 +736,52 @@ function sendMacro() {
     let macro = HTML_MACRO_TEXT.value.toUpperCase();
     socket.emit('macro', JSON.stringify([NXBT_CONTROLLER_INDEX, macro]));
 }
+
+function startMacroRecording() {
+    socket.emit('start_recording');
+}
+
+function stopMacroRecording() {
+    socket.emit('stop_recording');
+}
+
+function updateRecordingUI(status) {
+    const recording = Boolean(status && status.recording);
+    HTML_RECORD_MACRO_BTN.disabled = recording;
+    HTML_STOP_MACRO_BTN.disabled = !recording;
+
+    if (status && status.error) {
+        HTML_RECORDING_STATUS.innerText = "Recording error: " + status.error;
+        HTML_DOWNLOAD_MACRO_LINK.classList.add("hidden");
+        return;
+    }
+
+    if (recording) {
+        HTML_RECORDING_STATUS.innerText = "Recording to " + (status.path || "macro file") + "...";
+        HTML_DOWNLOAD_MACRO_LINK.classList.add("hidden");
+        return;
+    }
+
+    if (status && status.path) {
+        const lines = status.lines != null ? status.lines : 0;
+        HTML_RECORDING_STATUS.innerText =
+            "Saved " + lines + " line(s) to " + status.path;
+        if (status.name) {
+            HTML_DOWNLOAD_MACRO_LINK.href = "/macros/" + encodeURIComponent(status.name);
+            HTML_DOWNLOAD_MACRO_LINK.classList.remove("hidden");
+        } else {
+            HTML_DOWNLOAD_MACRO_LINK.classList.add("hidden");
+        }
+        return;
+    }
+
+    HTML_RECORDING_STATUS.innerText = "Not recording";
+    HTML_DOWNLOAD_MACRO_LINK.classList.add("hidden");
+}
+
+socket.on('recording_status', function(status) {
+    updateRecordingUI(status);
+});
 
 /**********************************************/
 /* Debug Functionality */

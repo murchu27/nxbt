@@ -209,6 +209,16 @@
                     </p>
                     <textarea id="macro-text" class="mono" placeholder="Type Your Macro Here" onfocus="disableKeyHandlers()" onblur="enableKeyHandlers()"></textarea>
                     <button onclick="sendMacro()">Run Macro</button>
+
+                    <h2 class="surface-lighter">Record Macro</h2>
+                    <p>
+                        Record live keyboard or gamepad input as a reusable macro file.
+                        Keep this browser tab focused while recording from a gamepad.
+                    </p>
+                    <button id="record-macro-btn" onclick="startMacroRecording()">Record</button>
+                    <button id="stop-macro-btn" onclick="stopMacroRecording()" disabled>Stop</button>
+                    <a id="download-macro-link" class="hidden" href="#">Download</a>
+                    <p id="recording-status">Not recording</p>
                 </div>
             </section>
 

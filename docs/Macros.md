@@ -1,5 +1,17 @@
 # Writing an NXBT Macro
 
+### Recording macros (webapp)
+
+You can record a macro from a keyboard or a physical gamepad attached to your PC:
+
+1. Start the webapp (`nxbt webapp`) and create a Pro Controller.
+2. Under **Input Device**, select your gamepad (press a button on the pad if it does not appear yet), or leave keyboard selected.
+3. Click **Record**, play the sequence, then click **Stop**.
+4. Keep the browser tab focused while recording from a gamepad — many browsers only poll pads for the active page.
+5. The macro is written to `~/.nxbt/macros/` (respects `HOME`, including when launched with `sudo -E`). Each Record session creates a new timestamped file. Use **Download** in the UI, or open the saved `.txt` file directly. When run under `sudo`, new files and directories are chowned back to the invoking user (`SUDO_UID` / `SUDO_GID`).
+
+Recorded stick positions are lightly quantized (deadzone near center, steps of 5) so analog noise does not inflate long recordings.
+
 ### Basic Macro script
 
 Every macro script is composed of Button/Stick input followed by a set duration. Here is a sample of this.
