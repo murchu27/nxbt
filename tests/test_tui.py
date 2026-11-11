@@ -225,17 +225,9 @@ class TestRemoteDetection(unittest.TestCase):
         # We can simulate force_remote=False
 
         with patch(
-            "nxbt.tui.InputTUI.detect_remote_connection",
-            side_effect=InputTUI.detect_remote_connection,
-            autospec=True,
+            "nxbt.tui.InputTUI._needs_terminal_key_input",
+            return_value=False,
         ):
-            # We need to call the UNBOUND method or bound?
-            # Actually, if we want to test detect_remote_connection logic isolated, we don't need to instantiate InputTUI fully.
-            # We can just call InputTUI.detect_remote_connection(None) if it doesn't use self.
-            # Looking at code: it does NOT use self!
-            # def detect_remote_connection(self): ...
-            # It acts like a static method but is an instance method.
-
             is_remote = InputTUI.detect_remote_connection(None)
             self.assertFalse(is_remote)
 
@@ -255,8 +247,12 @@ class TestRemoteDetection(unittest.TestCase):
 
         mock_process_cls.side_effect = side_effect_process_ssh
 
-        is_remote = InputTUI.detect_remote_connection(None)
-        self.assertTrue(is_remote)
+        with patch(
+            "nxbt.tui.InputTUI._needs_terminal_key_input",
+            return_value=False,
+        ):
+            is_remote = InputTUI.detect_remote_connection(None)
+            self.assertTrue(is_remote)
 
 
 if __name__ == "__main__":

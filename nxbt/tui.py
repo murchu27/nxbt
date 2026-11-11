@@ -349,34 +349,47 @@ class InputTUI:
         self.debug = debug
         self.logfile = logfile
 
+    @staticmethod
+    def _needs_terminal_key_input():
+        """True when pynput global hooks are unlikely to see terminal keys.
+
+        Wayland cannot deliver key events to pynput. sudo often keeps
+        DISPLAY=:0 (XWayland) while dropping WAYLAND_DISPLAY, which falsely
+        looks like X11 — so any root run also uses terminal keys.
+        """
+        session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+        if session_type == "wayland" or os.environ.get("WAYLAND_DISPLAY"):
+            return True
+        if session_type and session_type != "x11":
+            return True
+        # Root/sudo: pynput almost never sees keys from the user terminal.
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            return True
+        return False
+
     def detect_remote_connection(self):
-        """Traverse up the parent processes and check if any
-        have their parent as a remote daemon. If so, the python
-        script is running under a remote connection.
+        """Detect environments where direct (pynput) input will not work.
 
-        Remote shell detection is required for this TUI, due to
-        keyboard input limitations on most remote connections.
-        Specifically, no "keyup" events are sent when a key is
-        released. Keyup events are required for proper input to
-        the Switch, thus, we need to detect if the shell is a remote
-        session and workaround this.
+        Remote shells and Wayland sessions do not reliably deliver keyup
+        events to pynput. In those cases the TUI falls back to terminal
+        key reads (same path as remote_tui).
 
-        :return: Returns a boolean value indicating whether or not
-        the current script is running as SSH
+        :return: True when the terminal key input path should be used
         :rtype: bool
         """
 
-        remote_connection = False
+        if InputTUI._needs_terminal_key_input():
+            return True
+
         remote_process_names = ["sshd", "mosh-server"]
         ppid = os.getppid()
         while ppid > 0:
             process = psutil.Process(ppid)
             if process.name() in remote_process_names:
-                remote_connection = True
-                break
+                return True
             ppid = process.ppid()
 
-        return remote_connection
+        return False
 
     def start(self):
         self.mainloop(self.term)
