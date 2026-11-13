@@ -656,12 +656,20 @@ class BumbleBackend(Backend):
                 ):
                     raise OSError(
                         "You may reconnect on the pair sceeen, force to repair"
-                    )
-                elif e.error_code in (
+                    ) from e
+                if e.error_code in (
                     HCI_AUTHENTICATION_FAILURE_ERROR,
                     HCI_CONNECTION_REJECTED_DUE_TO_UNACCEPTABLE_BD_ADDR_ERROR,
                 ):
-                    raise OSError("Your bonded device is untrusted, force to repair")
+                    raise OSError(
+                        "Your bonded device is untrusted, force to repair"
+                    ) from e
+                # Unknown HCI/connection failure: try the next address rather than
+                # falling through with unbound bridge locals (UnboundLocalError).
+                self.logger.debug(
+                    f"BumbleBackend: reconnect to {address} failed: {e}"
+                )
+                continue
             self._bridges.append(itr_bridge)
             itr = _BumbleSocket(itr_bridge.socket, address, local_addr)
             itr._bridge = itr_bridge
